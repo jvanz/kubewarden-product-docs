@@ -1,0 +1,580 @@
+include::partial$variables.adoc[]
+
+= Migration from the three-subchart AppCo setup
+:page-languages: [en, de, es, fr, ja, pt, zh]
+:revdate: 2026-07-16
+:page-revdate: {revdate}
+:description: Migrate from the SUSE Application Collection suse-security-admission-controller 0.8.0 umbrella chart (three subcharts) to the 1.0.0 flat single chart.
+:doc-persona: ["kubewarden-operator"]
+:doc-topic: ["chart-migration", "application-collection", "appco-upgrade"]
+:doc-type: ["howto"]
+:keywords: ["{admc-name}", "kubewarden", "helm", "chart", "migration", "upgrade", "suse-security-admission-controller", "application-collection", "appco", "subchart", "flat-chart"]
+:sidebar_label: Migration from the AppCo three-subchart setup
+
+== Migration from the {admc-name} three-subchart chart to the flat single chart
+
+This page describes how to migrate an existing {admc-name} installation based
+on the `suse-security-admission-controller` version `0.8.0` Helm chart to the
+`suse-security-admission-controller` version `1.0.0` chart, both published in
+the https://apps.rancher.io[SUSE Application Collection].
+
+The version `0.8.0` chart is an umbrella chart that embeds three Kubewarden
+subcharts (`kubewarden-crds`, `kubewarden-controller`, and
+`kubewarden-defaults`) as Helm dependencies. Version `1.0.0` replaces this
+structure with a single flat chart that contains all {admc-product-short-name}
+components directly, removing the subchart nesting.
+
+[WARNING]
+====
+As described in the xref:reference/upgrade-path.adoc[upgrade path documentation],
+version jumping is not allowed. You must migrate from {admc-name} chart version
+`0.8.0` (appVersion `1.36.0`) to version `1.0.0` (appVersion `1.37.0`).
+====
+
+Unlike the
+xref:product-specific/howtos/chart-migration.adoc[migration from the community three-chart setup],
+this is an AppCo-to-AppCo migration. The image registry
+(`dp.apps.rancher.io`), the registry key (`global.imageRegistry`), and the pull
+secrets key (`global.imagePullSecrets`) all remain the same. The main work is
+flattening your values file by removing the subchart key prefixes.
+
+This migration involves a short window, between uninstalling the old chart and
+the new chart becoming ready, when policies do not protect your cluster. You
+can use the xref:howtos/audit-scanner.adoc[Audit Scanner] after the migration
+completes to identify any resources that may have entered the cluster without
+being evaluated during that window.
+
+[#what-changes]
+== What changes in this migration
+
+[cols="1,2,2", options="header"]
+|===
+| Aspect | Old chart (v0.8.0) | New chart (v1.0.0)
+
+| Chart version
+| `0.8.0` (appVersion `1.36.0`)
+| `1.0.0` (appVersion `1.37.0`)
+
+| Internal structure
+| Umbrella chart with three subcharts: `kubewarden-crds`, `kubewarden-controller`, `kubewarden-defaults`
+| All Kubewarden components in one flat chart; no Kubewarden subcharts
+
+| Helm releases
+| One release managing three subcharts
+| One release, one flat chart
+
+| Values shape
+| Subchart keys required: `kubewarden-controller.*`, `kubewarden-defaults.*`, `kubewarden-crds.*`
+| All keys at top level; subchart key prefixes removed
+
+| Image registry
+| `dp.apps.rancher.io`
+| `dp.apps.rancher.io` (unchanged)
+
+| Registry key
+| `global.imageRegistry`
+| `global.imageRegistry` (unchanged)
+
+| Pull secrets key
+| `global.imagePullSecrets`
+| `global.imagePullSecrets` (unchanged)
+
+| Policy module registry
+| `ghcr.io` (via `recommendedPolicies.defaultPoliciesRegistry`)
+| `ghcr.io` (unchanged)
+
+| CRD ownership
+| `kubewarden-crds` subchart — no `helm.sh/resource-policy: keep` annotation
+| Flat chart CRDs annotated with `helm.sh/resource-policy: keep`
+|===
+
+[NOTE]
+====
+Because this is an AppCo-to-AppCo migration, you do not need to change
+`global.imageRegistry`, `global.imagePullSecrets`, or your Application
+Collection registry credentials. Those values carry over unchanged. The only
+structural change is removing the subchart key prefixes from your values.
+====
+
+[WARNING]
+====
+The `kubewarden-crds` subchart embedded in the v0.8.0 chart does not annotate
+its CRDs with `helm.sh/resource-policy: keep`. Uninstalling the v0.8.0 chart
+deletes the five policy CRDs
+(`policyservers.policies.kubewarden.io`,
+`clusteradmissionpolicies.policies.kubewarden.io`,
+`admissionpolicies.policies.kubewarden.io`,
+`clusteradmissionpolicygroups.policies.kubewarden.io`,
+`admissionpolicygroups.policies.kubewarden.io`), which cascade-deletes every
+custom resource of those types from the cluster.
+
+The `kubewarden-controller` subchart also runs a pre-delete hook on uninstall
+that deletes all PolicyServer resources before the controller itself is removed.
+
+Nothing policy-related survives the uninstall. The backup taken in Step 1 is
+the only copy of your policies and policy server definitions. Step 6 restores
+them after the new chart is running.
+====
+
+[#prerequisites]
+== Prerequisites
+
+* Helm v3 or later.
+* `kubectl` with access to your cluster.
+* `yq` v4 (https://github.com/mikefarah/yq[github.com/mikefarah/yq]) for
+  filtering backed-up resources and transforming your values file.
+* The {admc-name} chart installed at chart version `0.8.0` (appVersion `1.36.0`).
+* Valid credentials for `dp.apps.rancher.io` (already configured from your
+  existing installation).
+* The {admc-name} chart version `1.0.0` available at
+  `{admc-chart-location}`.
+
+[#migration-steps]
+== Migration steps
+
+Set shell variables used throughout the following steps.
+Replace the placeholders with values matching your installation:
+
+[source,sh]
+----
+NAMESPACE=<your-namespace>
+----
+
+`$NAMESPACE` is the namespace where the {admc-name} chart is installed.
+
+[#step-backup]
+=== Step 1: Back up your policies and policy servers
+
+Back up all your {policy-server} instances and policy custom resources.
+These are restored after the new chart is running.
+
+[source,sh]
+----
+FILTER='del(.items[].metadata.uid, .items[].metadata.resourceVersion, .items[].metadata.creationTimestamp, .items[].metadata.generation, .items[].metadata.managedFields, .items[].status)'
+
+kubectl get clusteradmissionpolicies -A -o yaml | yq "$FILTER" > clusteradmissionpolicies-backup.yaml
+kubectl get admissionpolicies -A -o yaml | yq "$FILTER" > admissionpolicies-backup.yaml
+kubectl get clusteradmissionpolicygroups -A -o yaml | yq "$FILTER" > clusteradmissionpolicygroups-backup.yaml
+kubectl get admissionpolicygroups -A -o yaml | yq "$FILTER" > admissionpolicygroups-backup.yaml
+kubectl get policyservers -A -o yaml | yq "$FILTER" > policyservers-backup.yaml
+----
+
+[#step-capture-values]
+=== Step 2: Capture your existing values
+
+Save your current user-supplied values from the existing release for reference.
+You will transform this file in Step 4.
+
+[source,sh]
+----
+helm get values suse-security-admission-controller \
+  -n "$NAMESPACE" \
+  -o yaml > old-values.yaml
+----
+
+[#step-uninstall]
+=== Step 3: Uninstall the old chart
+
+Uninstall the v0.8.0 chart. Because there is a single Helm release, only one
+command is needed:
+
+[source,sh]
+----
+helm uninstall suse-security-admission-controller -n "$NAMESPACE"
+----
+
+[WARNING]
+====
+As noted in <<what-changes>>, uninstalling the v0.8.0 chart deletes the five
+policy CRDs and cascade-deletes every policy custom resource. The
+`kubewarden-controller` subchart pre-delete hook also deletes all PolicyServer
+resources before the controller pod is removed.
+
+Nothing policy-related survives the uninstall. The backup taken in Step 1 is
+the only copy.
+====
+
+[#step-flatten-values]
+=== Step 4: Flatten your values file
+
+The central change between v0.8.0 and v1.0.0 is that subchart key prefixes are
+removed. Every key previously nested under `kubewarden-controller`,
+`kubewarden-defaults`, or `kubewarden-crds` is now at the top level.
+
+Use the following `yq` command to promote all subchart keys automatically:
+
+[source,sh]
+----
+yq eval '
+  . * (.["kubewarden-controller"] // {}) |
+  . * (.["kubewarden-defaults"] // {}) |
+  . * (.["kubewarden-crds"] // {}) |
+  del(.["kubewarden-controller"]) |
+  del(.["kubewarden-defaults"]) |
+  del(.["kubewarden-crds"])
+' old-values.yaml > new-values.yaml
+----
+
+The transformation converts a v0.8.0 values file like this:
+
+[source,yaml]
+----
+global:
+  imagePullSecrets:
+    - application-collection
+kubewarden-controller:
+  auditScanner:
+    policyReporter: true
+  policy-reporter:
+    ui:
+      service:
+        type: NodePort
+kubewarden-defaults:
+  recommendedPolicies:
+    enabled: true
+----
+
+Into the flat v1.0.0 form:
+
+[source,yaml]
+----
+global:
+  imagePullSecrets:
+    - application-collection
+auditScanner:
+  policyReporter: true
+policy-reporter:
+  ui:
+    service:
+      type: NodePort
+recommendedPolicies:
+  enabled: true
+----
+
+After running the `yq` command, review `new-values.yaml` manually before
+proceeding. Pay attention to:
+
+* **`policyServer.imagePullSecret`**: if this key was set to `null` in your old
+  values, remove it from the new file. The v1.0.0 chart expects an empty string
+  (`""`) or the key to be absent entirely; an explicit `null` may cause
+  unexpected behavior.
+* **`kubewarden-controller.fullnameOverride`**: if you had set
+  `kubewarden-controller.fullnameOverride: suse-security-admission-controller`,
+  the `yq` command promotes it to `fullnameOverride` at the top level. Verify
+  this is what you intend.
+
+See <<mapping-values>> for the complete key mapping reference.
+
+[#step-install]
+=== Step 5: Install the new chart
+
+Install the v1.0.0 chart using the flattened values file produced in Step 4.
+The chart ships its own CRDs and installs them directly, so no ownership
+adoption is needed.
+
+[source,sh,subs="attributes+"]
+----
+helm install suse-security-admission-controller \
+  {admc-chart-location} \
+  --version 1.0.0 \
+  -n "$NAMESPACE" \
+  --values new-values.yaml \
+  --wait
+----
+
+[#step-restore]
+=== Step 6: Restore your policies and policy servers
+
+The `--wait` flag used in Step 5 makes `helm install` block until the
+controller deployment is fully ready before returning, so no additional wait
+command is needed here.
+
+Update the PolicyServer images in your backup
+file before applying. The backed-up PolicyServers carry a `spec.image` field
+pinned to the v0.8.0 policy-server image. Update it to the v1.0.0 image:
+
+[source,sh,subs="attributes+"]
+----
+yq eval '.items[].spec.image = "{default-policy-server-image-tag}"' \
+  -i policyservers-backup.yaml
+----
+
+Now restore the backed-up resources:
+
+[source,sh]
+----
+kubectl apply -f policyservers-backup.yaml
+kubectl apply -f clusteradmissionpolicies-backup.yaml
+kubectl apply -f admissionpolicies-backup.yaml
+kubectl apply -f clusteradmissionpolicygroups-backup.yaml
+kubectl apply -f admissionpolicygroups-backup.yaml
+----
+
+[#step-verify]
+=== Step 7: Verify the migration
+
+Check that the CRDs are now owned by the new release and the controller is
+running:
+
+[source,sh]
+----
+# CRDs owned by the new release
+kubectl get crd policyservers.policies.kubewarden.io \
+  -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}'
+
+# Controller running
+kubectl get deployment -n "$NAMESPACE" \
+  -l app.kubernetes.io/component=controller
+----
+
+Confirm that every backed-up resource was re-created by comparing item counts
+from the backup files against live cluster state. The `expected` and `actual`
+counts must match for each type:
+
+[source,sh]
+----
+for kind in policyservers clusteradmissionpolicies admissionpolicies \
+            clusteradmissionpolicygroups admissionpolicygroups; do
+  expected=$(yq '.items | length' "${kind}-backup.yaml")
+  actual=$(kubectl get "$kind" -A --no-headers 2>/dev/null | wc -l)
+  echo "$kind: expected=$expected actual=$actual"
+done
+----
+
+If any count does not match, re-apply the corresponding backup file and check
+the controller logs for errors.
+
+Check that all restored policies have reached `active` status. The controller
+reconciles them automatically:
+
+[source,sh]
+----
+# Policies active
+kubectl get clusteradmissionpolicies
+kubectl get admissionpolicies -A
+kubectl get clusteradmissionpolicygroups
+kubectl get admissionpolicygroups -A
+----
+
+Confirm that every restored PolicyServer is using the v1.0.0 policy-server
+image. Every `IMAGE` value must start with `dp.apps.rancher.io`:
+
+[source,sh]
+----
+kubectl get policyservers \
+  -o custom-columns=NAME:.metadata.name,IMAGE:.spec.image
+----
+
+[#mapping-values]
+== Mapping your values to the new chart
+
+The v1.0.0 chart uses a flat `values.yaml` that consolidates what the three
+subcharts configured through nested keys. The rule is straightforward: strip
+the subchart prefix. The key names themselves do not change.
+
+[cols="2,2,2", options="header"]
+|===
+| Old key (v0.8.0) | New key (v1.0.0) | Notes
+
+3+| *Global keys (pass through unchanged)*
+
+| `global.imageRegistry`
+| `global.imageRegistry`
+| Unchanged
+
+| `global.imagePullSecrets`
+| `global.imagePullSecrets`
+| Unchanged
+
+| `global.affinity`
+| `global.affinity`
+| Unchanged
+
+| `global.tolerations`
+| `global.tolerations`
+| Unchanged
+
+| `global.skipNamespaces`
+| `global.skipNamespaces`
+| Unchanged
+
+3+| *From `kubewarden-crds` subchart*
+
+| `kubewarden-crds.installPolicyReportCRDs`
+| `installPolicyReportCRDs`
+| Strip prefix
+
+| `kubewarden-crds.installOpenReportsCRDs`
+| `installOpenReportsCRDs`
+| Strip prefix
+
+3+| *From `kubewarden-controller` subchart*
+
+| `kubewarden-controller.logLevel`
+| `logLevel`
+| Strip prefix
+
+| `kubewarden-controller.replicas`
+| `replicas`
+| Strip prefix
+
+| `kubewarden-controller.image.*`
+| `image.*`
+| Strip prefix
+
+| `kubewarden-controller.nameOverride`
+| `nameOverride`
+| Strip prefix
+
+| `kubewarden-controller.fullnameOverride`
+| `fullnameOverride`
+| Strip prefix; verify the value is still correct
+
+| `kubewarden-controller.resources.*`
+| `resources.*`
+| Strip prefix
+
+| `kubewarden-controller.telemetry.*`
+| `telemetry.*`
+| Strip prefix
+
+| `kubewarden-controller.mTLS.*`
+| `mTLS.*`
+| Strip prefix
+
+| `kubewarden-controller.hostNetwork`
+| `hostNetwork`
+| Strip prefix
+
+| `kubewarden-controller.ports.*`
+| `ports.*`
+| Strip prefix
+
+| `kubewarden-controller.auditScanner.*`
+| `auditScanner.*`
+| Strip prefix
+
+| `kubewarden-controller.policy-reporter.*`
+| `policy-reporter.*`
+| Strip prefix; `policy-reporter` remains a subchart
+
+| `kubewarden-controller.podAnnotations`
+| `podAnnotations`
+| Strip prefix
+
+| `kubewarden-controller.nodeSelector`
+| `nodeSelector`
+| Strip prefix
+
+| `kubewarden-controller.additionalLabels`
+| `additionalLabels`
+| Strip prefix
+
+| `kubewarden-controller.additionalAnnotations`
+| `additionalAnnotations`
+| Strip prefix
+
+| `kubewarden-controller.containerSecurityContext`
+| `containerSecurityContext`
+| Strip prefix
+
+| `kubewarden-controller.podSecurityContext`
+| `podSecurityContext`
+| Strip prefix
+
+| `kubewarden-controller.preDeleteHook.*`
+| `preDeleteHook.*`
+| Strip prefix
+
+| `kubewarden-controller.alwaysAcceptAdmissionReviewsOnDeploymentsNamespace`
+| `alwaysAcceptAdmissionReviewsOnDeploymentsNamespace`
+| Strip prefix
+
+| `kubewarden-controller.additionalEnvironmentVariables`
+| `additionalEnvironmentVariables`
+| Strip prefix
+
+3+| *From `kubewarden-defaults` subchart*
+
+| `kubewarden-defaults.policyServer.*`
+| `policyServer.*`
+| Strip prefix
+
+| `kubewarden-defaults.policyServer.imagePullSecret`
+| `policyServer.imagePullSecret`
+| Strip prefix; if previously `null`, omit the key or set it to `""`
+
+| `kubewarden-defaults.recommendedPolicies.*`
+| `recommendedPolicies.*`
+| Strip prefix
+
+| `kubewarden-defaults.crdVersion`
+| `crdVersion`
+| Strip prefix
+
+| `kubewarden-defaults.additionalLabels`
+| `additionalLabels`
+| Strip prefix; merge with any value from `kubewarden-controller`
+
+| `kubewarden-defaults.additionalAnnotations`
+| `additionalAnnotations`
+| Strip prefix; merge with any value from `kubewarden-controller`
+|===
+
+[NOTE]
+====
+If you had the same key set in both `kubewarden-controller` and
+`kubewarden-defaults` (for example `additionalLabels`), the `yq` merge command
+in Step 4 applies them left-to-right: `kubewarden-defaults` values overwrite
+`kubewarden-controller` values. Review the merged output and set the final
+value explicitly in `new-values.yaml` if needed.
+====
+
+[#caveats]
+== Caveats
+
+[#crd-adoption]
+=== CRDs are recreated by the new chart
+
+The `kubewarden-crds` subchart embedded in v0.8.0 does not annotate its CRDs
+with `helm.sh/resource-policy: keep`, so `helm uninstall` in Step 3 deletes
+them. The v1.0.0 chart ships its own copies of the five policy CRDs and
+installs them as part of a fresh install. No ownership adoption is required.
+
+The v1.0.0 chart does annotate its CRDs with `helm.sh/resource-policy: keep`,
+so a future uninstall of the v1.0.0 chart will leave the CRDs in place to
+protect any policies still running in the cluster.
+
+[#fullname-override]
+=== `fullnameOverride` after flattening
+
+The v0.8.0 `values.local.yaml` example sets
+`kubewarden-controller.fullnameOverride: suse-security-admission-controller`.
+After flattening, this becomes top-level `fullnameOverride`. Verify that the
+promoted value matches what you need for your deployment; it controls the name
+prefix of controller resources such as the deployment and services.
+
+[#downtime-window]
+=== Policy enforcement gap
+
+Between Step 3 (uninstall the old chart) and Step 5 (the new chart becoming
+ready), no admission controller is running. The webhook configurations created
+by the old chart are deleted when the controller subchart is uninstalled, so
+no admission evaluation takes place during this window.
+
+After the migration completes, run the Audit Scanner to identify any
+non-compliant resources that may have entered the cluster during the gap:
+
+[source,sh]
+----
+kubectl create job --from=cronjob/audit-scanner audit-scanner-manual -n "$NAMESPACE"
+----
+
+[#pull-secret-null]
+=== `policyServer.imagePullSecret` type change
+
+In the v0.8.0 `kubewarden-defaults` subchart, `policyServer.imagePullSecret`
+defaults to `null`. In the v1.0.0 chart it defaults to `""` (empty string). If
+your captured values file contains `policyServer.imagePullSecret: null` after
+flattening, remove that key from `new-values.yaml` before installing the new
+chart. An explicit `null` may override the chart default in unexpected ways.
