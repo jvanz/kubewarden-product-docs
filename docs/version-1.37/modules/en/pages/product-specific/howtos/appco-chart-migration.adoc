@@ -240,13 +240,29 @@ recommendedPolicies:
   enabled: true
 ----
 
-After running the `yq` command, review `new-values.yaml` manually before
+Then strip `policyServer.imagePullSecret` if it flattened to `null`. The
+v0.8.0 `kubewarden-defaults` subchart defaults that key to `null`, so if you
+seeded your override file from the chart's default `values.yaml`, the flatten
+promotes it rather than dropping it. The v1.0.0 chart expects the key to be
+absent or set to `""`:
+
+[source,sh]
+----
+yq eval 'del(select(.policyServer.imagePullSecret == null) | .policyServer.imagePullSecret)' \
+  -i new-values.yaml
+----
+
+This command is a no-op if `policyServer.imagePullSecret` is absent or holds a
+real value, so it is safe to run regardless.
+
+After running the `yq` commands, review `new-values.yaml` manually before
 proceeding. Pay attention to:
 
-* **`policyServer.imagePullSecret`**: if this key was set to `null` in your old
-  values, remove it from the new file. The v1.0.0 chart expects an empty string
-  (`""`) or the key to be absent entirely; an explicit `null` may cause
-  unexpected behavior.
+* **`policyServer.imagePullSecret`**: the v0.8.0 subchart defaults this to
+  `null`. If your override file was seeded from the chart's default
+  `values.yaml`, that `null` ends up in `new-values.yaml` after flattening.
+  The cleanup command above strips it. If you set the key to a real secret
+  name, the command leaves it alone.
 * **`kubewarden-controller.fullnameOverride`**: if you had set
   `kubewarden-controller.fullnameOverride: suse-security-admission-controller`,
   the `yq` command promotes it to `fullnameOverride` at the top level. Verify
@@ -447,7 +463,7 @@ the subchart prefix. The key names themselves do not change.
 
 | `kubewarden-defaults.policyServer.imagePullSecret`
 | `policyServer.imagePullSecret`
-| Strip prefix; if previously `null`, omit the key or set it to `""`
+| Strip prefix; the Step 4 cleanup command removes it if it flattened to `null`
 
 | `kubewarden-defaults.recommendedPolicies.*`
 | `recommendedPolicies.*`
@@ -526,8 +542,9 @@ include::partial$image-pull-secrets-caveat.adoc[]
 [#pull-secret-null]
 === `policyServer.imagePullSecret` type change
 
-In the v0.8.0 `kubewarden-defaults` subchart, `policyServer.imagePullSecret`
-defaults to `null`. In the v1.0.0 chart it defaults to `""` (empty string). If
-your captured values file contains `policyServer.imagePullSecret: null` after
-flattening, remove that key from `new-values.yaml` before installing the new
-chart. An explicit `null` may override the chart default in unexpected ways.
+The v0.8.0 `kubewarden-defaults` subchart defaults `policyServer.imagePullSecret`
+to `null`; the v1.0.0 chart defaults it to `""` (empty string). If you seeded
+your override file from the chart's default `values.yaml`, the flatten in Step 4
+picks up that `null` and puts it at the top level of `new-values.yaml`. The
+cleanup command in Step 4 strips it. If you set this key to a real secret name,
+the command leaves it alone and there is nothing else to do.
