@@ -10,7 +10,7 @@ include::partial$variables.adoc[]
 :doc-type: ["howto"]
 :keywords: ["{admc-name}", "kubewarden", "helm", "chart", "migration", "upgrade", "kubewarden-crds", "kubewarden-controller", "kubewarden-defaults", "suse-security-admission-controller", "application-collection", "appco"]
 :sidebar_label: Migration from the community three-chart setup
-:migration-namespace: suse-sec-adm-controller
+:migration-namespace: $TARGET_NAMESPACE
 
 == Migration from the community three-chart setup to the {admc-name} single chart
 This page describes how to migrate an existing {community-project-name} installation
@@ -123,6 +123,21 @@ the community and {admc-name} charts and do *not* need to be changed.
 [#migration-steps]
 == Migration steps
 
+Set shell variables for the namespaces used throughout the following steps.
+The community charts and the {admc-name} chart typically live in different
+namespaces, so they each get their own variable. Replace the placeholders
+with the actual namespaces from your installation:
+
+[source,sh]
+----
+SOURCE_NAMESPACE=<community-namespace>   # e.g. kubewarden
+TARGET_NAMESPACE=<appco-namespace>       # e.g. suse-sec-adm-controller
+----
+
+`$SOURCE_NAMESPACE` is the namespace where the three community charts are
+installed. `$TARGET_NAMESPACE` is the namespace where the {admc-name} chart
+will be installed.
+
 [#step-backup]
 === Step 1: Back up your policies and policy servers
 
@@ -136,9 +151,9 @@ You will pass these files directly to the new chart in Step 6.
 
 [source,sh]
 ----
-helm get values kubewarden-crds -n kubewarden -o yaml > kubewarden-crds-values.yaml
-helm get values kubewarden-controller -n kubewarden -o yaml > kubewarden-controller-values.yaml
-helm get values kubewarden-defaults -n kubewarden -o yaml > kubewarden-defaults-values.yaml
+helm get values kubewarden-crds -n "$SOURCE_NAMESPACE" -o yaml > kubewarden-crds-values.yaml
+helm get values kubewarden-controller -n "$SOURCE_NAMESPACE" -o yaml > kubewarden-controller-values.yaml
+helm get values kubewarden-defaults -n "$SOURCE_NAMESPACE" -o yaml > kubewarden-defaults-values.yaml
 ----
 
 Review the captured values and identify settings you want to carry over to the
@@ -159,9 +174,9 @@ Uninstall the three community charts in order.
 
 [source,sh]
 ----
-helm uninstall kubewarden-defaults -n kubewarden
-helm uninstall kubewarden-controller -n kubewarden
-helm uninstall kubewarden-crds -n kubewarden
+helm uninstall kubewarden-defaults -n "$SOURCE_NAMESPACE"
+helm uninstall kubewarden-controller -n "$SOURCE_NAMESPACE"
+helm uninstall kubewarden-crds -n "$SOURCE_NAMESPACE"
 ----
 
 [WARNING]
@@ -214,7 +229,7 @@ component images.
 ----
 helm install kubewarden \
   oci://dp.apps.rancher.io/charts/suse-security-admission-controller \
-  -n suse-sec-adm-controller \
+  -n "$TARGET_NAMESPACE" \
   --set global.imagePullSecrets={application-collection}
 ----
 
@@ -227,7 +242,7 @@ later files take precedence:
 ----
 helm install kubewarden \
   oci://dp.apps.rancher.io/charts/suse-security-admission-controller \
-  -n suse-sec-adm-controller \
+  -n "$TARGET_NAMESPACE" \
   --set global.imagePullSecrets={application-collection} \
   --values kubewarden-crds-values.yaml \
   --values kubewarden-controller-values.yaml \
@@ -244,7 +259,7 @@ controller registers, so the controller must be running before you apply them:
 [source,sh]
 ----
 kubectl rollout status deployment \
-  -n suse-sec-adm-controller \
+  -n "$TARGET_NAMESPACE" \
   -l app.kubernetes.io/component=controller \
   --timeout=300s
 ----
@@ -335,7 +350,7 @@ setup, re-enable them explicitly:
 ----
 helm install kubewarden \
   oci://dp.apps.rancher.io/charts/suse-security-admission-controller \
-  -n suse-sec-adm-controller \
+  -n "$TARGET_NAMESPACE" \
   --set recommendedPolicies.enabled=true \
   --set recommendedPolicies.defaultPolicyMode=monitor
 ----
@@ -409,5 +424,5 @@ non-compliant resources that may have entered the cluster during the gap:
 
 [source,sh]
 ----
-kubectl create job --from=cronjob/audit-scanner audit-scanner-manual -n suse-sec-adm-controller
+kubectl create job --from=cronjob/audit-scanner audit-scanner-manual -n "$TARGET_NAMESPACE"
 ----
