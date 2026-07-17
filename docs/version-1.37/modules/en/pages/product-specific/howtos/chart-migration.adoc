@@ -340,21 +340,6 @@ reads a top-level `imagePullSecrets` list, with `global.imagePullSecrets`
 taking precedence when both are set, so place your secrets under
 `global.imagePullSecrets`.
 
-=== Recommended policies
-
-The `recommendedPolicies.enabled` value defaults to `false` in both the community
-and {admc-name} charts. If you had recommended policies enabled in the community
-setup, re-enable them explicitly:
-
-[source,sh]
-----
-helm install kubewarden \
-  oci://dp.apps.rancher.io/charts/suse-security-admission-controller \
-  -n "$TARGET_NAMESPACE" \
-  --set recommendedPolicies.enabled=true \
-  --set recommendedPolicies.defaultPolicyMode=monitor
-----
-
 === Policy module registry
 
 The `recommendedPolicies.defaultPoliciesRegistry` value defaults to `ghcr.io`
