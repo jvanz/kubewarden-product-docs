@@ -88,11 +88,14 @@ registry and pull-secret conventions differ.
 
 [IMPORTANT]
 ====
-The {admc-name} chart does not read `global.cattle.systemDefaultRegistry` or a
-top-level `imagePullSecrets` list. Those keys have no effect and must not be
-carried into the new chart. Use `global.imageRegistry` and
-`global.imagePullSecrets` instead, or rely on the chart defaults to pull from
-`dp.apps.rancher.io`.
+The {admc-name} chart does not read `global.cattle.systemDefaultRegistry` or
+`global.cattle.imagePullSecrets`. Remove those keys from your values; the chart
+ignores them entirely.
+
+For pull secrets, the {admc-name} chart reads both `global.imagePullSecrets`
+and a top-level `imagePullSecrets` list (with `global.imagePullSecrets` taking
+precedence when both are set). Use `global.imagePullSecrets` — the Step 3 `yq`
+transform moves the community top-level key there automatically.
 ====
 
 [IMPORTANT]
@@ -310,7 +313,7 @@ the pull-secret key.
 
 | `imagePullSecrets` (top-level)
 | `global.imagePullSecrets`
-| Move under `global`; the `global.cattle.*` block is ignored by the {admc-name} chart
+| Normalize under `global`; both keys are read by the {admc-name} chart (via coalesce), with `global.imagePullSecrets` taking precedence
 
 | All other top-level keys (`logLevel`, `replicas`, `auditScanner.*`,
   `policyServer.*`, `telemetry.*`, `mTLS.*`, `recommendedPolicies.*`,
@@ -341,8 +344,10 @@ global:
 ----
 
 For pull secrets, the community chart used a top-level `imagePullSecrets` list.
-The {admc-name} chart reads `global.imagePullSecrets` instead. The Step 3 `yq`
-command moves the list automatically.
+The {admc-name} chart reads both `global.imagePullSecrets` and a top-level
+`imagePullSecrets` (with `global.imagePullSecrets` taking precedence when both
+are set). The Step 3 `yq` command moves the list to `global.imagePullSecrets`
+— the preferred key — automatically.
 
 === Recommended policies
 

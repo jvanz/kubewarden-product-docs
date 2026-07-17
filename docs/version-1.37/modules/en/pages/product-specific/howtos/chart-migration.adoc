@@ -85,6 +85,11 @@ The {admc-name} chart does not read `global.cattle.systemDefaultRegistry` or
 carried into the new chart. Use `global.imageRegistry` and
 `global.imagePullSecrets` instead, or rely on the chart defaults to pull from
 `dp.apps.rancher.io`.
+
+Note that the {admc-name} chart also reads a top-level `imagePullSecrets` list
+(with `global.imagePullSecrets` taking precedence). If you carry an
+`imagePullSecrets` key from the community values, use `global.imagePullSecrets`
+to keep the values in the preferred location.
 ====
 
 [IMPORTANT]
@@ -316,7 +321,10 @@ global:
 
 For pull secrets, the {admc-name} chart reads `global.imagePullSecrets` (a list
 of secret name strings or `{name: ...}` objects). This replaces
-`global.cattle.imagePullSecrets` from the community charts.
+`global.cattle.imagePullSecrets` from the community charts. The chart also
+reads a top-level `imagePullSecrets` list, with `global.imagePullSecrets`
+taking precedence when both are set, so place your secrets under
+`global.imagePullSecrets`.
 
 === Recommended policies
 
