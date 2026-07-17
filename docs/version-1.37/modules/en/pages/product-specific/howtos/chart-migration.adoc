@@ -98,8 +98,7 @@ Backed-up PolicyServer resources contain an explicit `spec.image` field pinned
 to the community policy-server image (for example,
 `ghcr.io/kubewarden/adm-controller/policy-server:v1.36.0`). The migration
 process in <<step-restore>> updates this field to the {admc-name} image
-(`dp.apps.rancher.io/containers/kubewarden-policy-server:1.37.0`) before
-applying the backup.
+(`{default-policy-server-image-tag}`) before applying the backup.
 
 Note that policy `spec.module` references (the Wasm policy module OCI images,
 e.g. `ghcr.io/kubewarden/policies/...`) are for now served from `ghcr.io` in both
@@ -254,9 +253,9 @@ Once the controller is ready, update the PolicyServer images in your backup file
 before applying. The backed-up PolicyServers carry a `spec.image` field pinned
 to the community policy-server image. Update it to the {admc-name} image:
 
-[source,sh]
+[source,sh,subs="attributes+"]
 ----
-yq eval '.items[].spec.image = "dp.apps.rancher.io/containers/kubewarden-policy-server:1.37.0"' \
+yq eval '.items[].spec.image = "{default-policy-server-image-tag}"' \
   -i policyservers-backup.yaml
 ----
 
