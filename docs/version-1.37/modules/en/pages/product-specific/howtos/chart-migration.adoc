@@ -349,6 +349,22 @@ in both charts. The policy module image repositories
 If you did not override `defaultPoliciesRegistry` in the community setup, no
 change is needed.
 
+In the community charts, `recommendedPolicies.defaultPoliciesRegistry` defaults
+to `""`, which falls back to `global.cattle.systemDefaultRegistry` (`ghcr.io`).
+The {admc-name} chart has no such fallback; it only honors
+`recommendedPolicies.defaultPoliciesRegistry` directly.
+
+If you relied on `global.cattle.systemDefaultRegistry` to redirect policy
+module pulls to a private mirror, you must now set
+`recommendedPolicies.defaultPoliciesRegistry` explicitly in the {admc-name}
+chart values:
+
+[source,yaml]
+----
+recommendedPolicies:
+  defaultPoliciesRegistry: "my-private-registry.example.com"
+----
+
 === CRD toggles
 
 The two CRD installation toggles use the same top-level key names in the
