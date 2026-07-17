@@ -274,9 +274,15 @@ helm install suse-security-admission-controller \
 [#step-restore]
 === Step 6: Restore your policies and policy servers
 
-The `--wait` flag used in Step 5 makes `helm install` block until the
-controller deployment is fully ready before returning, so no additional wait
-command is needed here.
+The `--wait` flag in Step 5 only blocks until the Helm-managed workloads are
+ready, like the controller Deployment. It does not wait for the default
+{policy-server}, because the controller (not Helm) creates that from the
+`kubewarden-defaults` ConfigMap once the install finishes. It appears a moment
+after `helm install` returns. The PolicyServers you restore below are handled
+the same way: the controller reconciles each one and starts its Deployment and
+webhook. So don't be surprised if a policy shows `pending` right after you
+apply the backup. It moves to `active` on its own once the controller finishes
+reconciling.
 
 Update the PolicyServer images in your backup
 file before applying. The backed-up PolicyServers carry a `spec.image` field
