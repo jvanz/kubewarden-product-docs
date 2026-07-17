@@ -10,6 +10,7 @@ include::partial$variables.adoc[]
 :doc-type: ["howto"]
 :keywords: ["{admc-name}", "kubewarden", "helm", "chart", "migration", "upgrade", "suse-security-admission-controller", "application-collection", "appco", "subchart", "flat-chart"]
 :sidebar_label: Migration from the AppCo three-subchart setup
+:migration-namespace: $NAMESPACE
 
 == Migration from the {admc-name} three-subchart chart to the flat single chart
 
@@ -145,19 +146,7 @@ NAMESPACE=<your-namespace>
 [#step-backup]
 === Step 1: Back up your policies and policy servers
 
-Back up all your {policy-server} instances and policy custom resources.
-These are restored after the new chart is running.
-
-[source,sh]
-----
-FILTER='del(.items[].metadata.uid, .items[].metadata.resourceVersion, .items[].metadata.creationTimestamp, .items[].metadata.generation, .items[].metadata.managedFields, .items[].status)'
-
-kubectl get clusteradmissionpolicies -A -o yaml | yq "$FILTER" > clusteradmissionpolicies-backup.yaml
-kubectl get admissionpolicies -A -o yaml | yq "$FILTER" > admissionpolicies-backup.yaml
-kubectl get clusteradmissionpolicygroups -A -o yaml | yq "$FILTER" > clusteradmissionpolicygroups-backup.yaml
-kubectl get admissionpolicygroups -A -o yaml | yq "$FILTER" > admissionpolicygroups-backup.yaml
-kubectl get policyservers -A -o yaml | yq "$FILTER" > policyservers-backup.yaml
-----
+include::partial$backup-policies.adoc[]
 
 [#step-capture-values]
 === Step 2: Capture your existing values
@@ -313,57 +302,7 @@ kubectl apply -f admissionpolicygroups-backup.yaml
 [#step-verify]
 === Step 7: Verify the migration
 
-Check that the CRDs are now owned by the new release and the controller is
-running:
-
-[source,sh]
-----
-# CRDs owned by the new release
-kubectl get crd policyservers.policies.kubewarden.io \
-  -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}'
-
-# Controller running
-kubectl get deployment -n "$NAMESPACE" \
-  -l app.kubernetes.io/component=controller
-----
-
-Confirm that every backed-up resource was re-created by comparing item counts
-from the backup files against live cluster state. The `expected` and `actual`
-counts must match for each type:
-
-[source,sh]
-----
-for kind in policyservers clusteradmissionpolicies admissionpolicies \
-            clusteradmissionpolicygroups admissionpolicygroups; do
-  expected=$(yq '.items | length' "${kind}-backup.yaml")
-  actual=$(kubectl get "$kind" -A --no-headers 2>/dev/null | wc -l)
-  echo "$kind: expected=$expected actual=$actual"
-done
-----
-
-If any count does not match, re-apply the corresponding backup file and check
-the controller logs for errors.
-
-Check that all restored policies have reached `active` status. The controller
-reconciles them automatically:
-
-[source,sh]
-----
-# Policies active
-kubectl get clusteradmissionpolicies
-kubectl get admissionpolicies -A
-kubectl get clusteradmissionpolicygroups
-kubectl get admissionpolicygroups -A
-----
-
-Confirm that every restored PolicyServer is using the v1.0.0 policy-server
-image. Every `IMAGE` value must start with `dp.apps.rancher.io`:
-
-[source,sh]
-----
-kubectl get policyservers \
-  -o custom-columns=NAME:.metadata.name,IMAGE:.spec.image
-----
+include::partial$verify-migration.adoc[]
 
 [#mapping-values]
 == Mapping your values to the new chart

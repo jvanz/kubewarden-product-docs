@@ -1,6 +1,6 @@
 include::partial$variables.adoc[]
 
-= Migration from three-chart setup
+= Migration from community three-chart setup
 :page-languages: [en, de, es, fr, ja, pt, zh]
 :revdate: 2026-07-08
 :page-revdate: {revdate}
@@ -10,6 +10,7 @@ include::partial$variables.adoc[]
 :doc-type: ["howto"]
 :keywords: ["{admc-name}", "kubewarden", "helm", "chart", "migration", "upgrade", "kubewarden-crds", "kubewarden-controller", "kubewarden-defaults", "suse-security-admission-controller", "application-collection", "appco"]
 :sidebar_label: Migration from the community three-chart setup
+:migration-namespace: suse-sec-adm-controller
 
 == Migration from the community three-chart setup to the {admc-name} single chart
 This page describes how to migrate an existing {community-project-name} installation
@@ -121,19 +122,7 @@ the community and {admc-name} charts and do *not* need to be changed.
 [#step-backup]
 === Step 1: Back up your policies and policy servers
 
-Back up all your {policy-server} instances and policy custom resources.
-These are restored after the new chart is running.
-
-[source,sh]
-----
-FILTER='del(.items[].metadata.uid, .items[].metadata.resourceVersion, .items[].metadata.creationTimestamp, .items[].metadata.generation, .items[].metadata.managedFields, .items[].status)'
-
-kubectl get clusteradmissionpolicies -A -o yaml | yq "$FILTER" > clusteradmissionpolicies-backup.yaml
-kubectl get admissionpolicies -A -o yaml | yq "$FILTER" > admissionpolicies-backup.yaml
-kubectl get clusteradmissionpolicygroups -A -o yaml | yq "$FILTER" > clusteradmissionpolicygroups-backup.yaml
-kubectl get admissionpolicygroups -A -o yaml | yq "$FILTER" > admissionpolicygroups-backup.yaml
-kubectl get policyservers -A -o yaml | yq "$FILTER" > policyservers-backup.yaml
-----
+include::partial$backup-policies.adoc[]
 
 [#step-capture-values]
 === Step 2: Capture your existing values (optional)
@@ -204,26 +193,7 @@ helm registry login dp.apps.rancher.io \
 [#step-pull-secret]
 === Step 5: Create the image pull secret
 
-The {admc-name} chart pulls its component images (controller, audit-scanner,
-policy-server) from `dp.apps.rancher.io`, which is a private registry. Create an
-image pull secret in the `suse-sec-adm-controller` namespace so the cluster can authenticate
-when pulling these images:
-
-[source,sh]
-----
-kubectl create secret docker-registry application-collection \
-  -n suse-sec-adm-controller \
-  --docker-server=dp.apps.rancher.io \
-  --docker-username=<your-username> \
-  --docker-password=<your-token>
-----
-
-You reference this secret when installing the chart in the next step. See also
-<<image-pull-secrets>> for how to make the secret available to policy-server
-pods, and the
-https://docs.apps.rancher.io/get-started/deploy-helm-chart#helm-charts-standardizations[Application Collection Helm chart standardizations]
-for background on how `global.imagePullSecrets` works across all Application
-Collection charts.
+include::partial$create-image-pull-secret.adoc[]
 
 [#step-install]
 === Step 6: Install the {admc-name} single chart
@@ -299,56 +269,7 @@ kubectl apply -f admissionpolicygroups-backup.yaml
 [#step-verify]
 === Step 8: Verify the migration
 
-Check that the CRDs are now owned by the new release and the controller is running:
-
-[source,sh]
-----
-# CRDs owned by the new release
-kubectl get crd policyservers.policies.kubewarden.io \
-  -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}'
-
-# Controller running
-kubectl get deployment -n suse-sec-adm-controller \
-  -l app.kubernetes.io/component=controller
-----
-
-Confirm that every backed-up resource was re-created by comparing item counts
-from the backup files against live cluster state. The `expected` and `actual`
-counts must match for each type:
-
-[source,sh]
-----
-for kind in policyservers clusteradmissionpolicies admissionpolicies \
-            clusteradmissionpolicygroups admissionpolicygroups; do
-  expected=$(yq '.items | length' "${kind}-backup.yaml")
-  actual=$(kubectl get "$kind" -A --no-headers 2>/dev/null | wc -l)
-  echo "$kind: expected=$expected actual=$actual"
-done
-----
-
-If any count does not match, re-apply the corresponding backup file and check
-the controller logs for errors.
-
-Check that all restored policies have reached `active` status. The controller
-reconciles them automatically:
-
-[source,sh]
-----
-# Policies active
-kubectl get clusteradmissionpolicies
-kubectl get admissionpolicies -A
-kubectl get clusteradmissionpolicygroups
-kubectl get admissionpolicygroups -A
-----
-
-Confirm that every restored PolicyServer is using the {admc-name} policy-server
-image. Every `IMAGE` value must start with `dp.apps.rancher.io`:
-
-[source,sh]
-----
-kubectl get policyservers \
-  -o custom-columns=NAME:.metadata.name,IMAGE:.spec.image
-----
+include::partial$verify-migration.adoc[]
 
 [#mapping-values]
 == Mapping your community chart values to the {admc-name} chart
