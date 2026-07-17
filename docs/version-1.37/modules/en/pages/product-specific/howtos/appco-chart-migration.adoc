@@ -509,6 +509,14 @@ non-compliant resources that may have entered the cluster during the gap:
 kubectl create job --from=cronjob/audit-scanner audit-scanner-manual -n "$NAMESPACE"
 ----
 
+[#image-pull-secrets]
+=== Image pull secrets for policy-server pods
+
+Because this is an AppCo-to-AppCo migration, your existing `global.imagePullSecrets`
+value and the `application-collection` secret carry over unchanged into the new chart.
+
+include::partial$image-pull-secrets-caveat.adoc[]
+
 [#pull-secret-null]
 === `policyServer.imagePullSecret` type change
 

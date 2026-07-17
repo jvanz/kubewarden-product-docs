@@ -371,17 +371,7 @@ the cluster.
 [#image-pull-secrets]
 === Image pull secrets for controller and policy-server images
 
-The {admc-name} chart pulls component images from `dp.apps.rancher.io`, which is
-a private registry. You need credentials to pull these images.
-<<step-pull-secret,Step 5>> creates the image pull secret and
-<<step-install,Step 6>> passes it to the chart during installation.
-
-For policy-server pods to pull images as well, the pull secret must also be
-present in the namespace where the {policy-server} runs. See the
-xref:howtos/policy-servers/02-private-registry.adoc[private registries how-to]
-for policy servers and the
-xref:howtos/application-collection/01-verify-images.adoc[Application Collection image verification how-to]
-for more detail.
+include::partial$image-pull-secrets-caveat.adoc[]
 
 [#downtime-window]
 === Policy enforcement gap
