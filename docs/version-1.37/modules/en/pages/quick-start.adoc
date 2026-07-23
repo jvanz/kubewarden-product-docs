@@ -28,7 +28,7 @@ The {admc-name} stack comprises:
   `PolicyServer`. The {admc-short-name} `PolicyServer` loads and evaluates your
   administrator's policies.
 * One or more {admission-policy} resources: policies for a defined namespace.
-* A deployment of a `kubewarden-controller`: this controller monitors the
+* A deployment of a `{admc-release}`: this controller monitors the
   {cluster-admission-policy} resources and interacts with the {admc-short-name}
   {policy-server} components.
 
@@ -69,81 +69,11 @@ names for the CRDs:
 [#_installation]
 == Installation
 
-[IMPORTANT]
-.Authentication
-====
-
-:gh-pat-url: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens
-
-You can retrieve {admc-short-name} policies from the GitHub container registry at
-https://ghcr.io. You need authentication to use the repository with the
-{admc-short-name} CLI, a {gh-pat-url}[GitHub personal access token] (PAT). Their
-documentation guides you through creating one if you haven't already done so.
-Then you authenticate with a command like:
-
-[subs="+attributes",console]
-----
-echo $PAT | docker login ghcr.io --username <my-gh-username> --password-stdin
-----
-
-====
-
-
-Deploy the {admc-short-name} stack using `helm` charts as follows:
-
-[subs="+attributes",console]
-----
-helm repo add kubewarden https://charts.kubewarden.io
-----
-
-[subs="+attributes",console]
-----
-helm repo update kubewarden
-----
-
-Install the following Helm charts in the `kubewarden` namespace in your
-Kubernetes cluster:
-
-* `kubewarden-crds`, which registers the {cluster-admission-policy},
-  {admission-policy} and {policy-server} Custom Resource Definitions. Also, the
-  {policy-report} Custom Resource Definitions used by the audit scanner.
-* `kubewarden-controller`, which installs the {admc-short-name} and the
-  audit scanner
-+
-[NOTE]
-====
-
-If you need to disable the audit scanner component check the audit scanner
-installation xref:howtos/audit-scanner.adoc[documentation page].
-
-====
-+
-* `kubewarden-defaults`, which creates a `PolicyServer` resource named
-  `default`. It can also install a set of recommended policies to secure your
-  cluster by enforcing well known best practices.
-
-[subs="+attributes",console]
-----
-helm install --wait -n kubewarden --create-namespace kubewarden-crds kubewarden/kubewarden-crds
-----
-
-[subs="+attributes",console]
-----
-helm install --wait -n kubewarden kubewarden-controller kubewarden/kubewarden-controller
-----
-
-[subs="+attributes",console]
-----
-helm install --wait -n kubewarden kubewarden-defaults kubewarden/kubewarden-defaults
-----
-
-The default configuration values are sufficient for most deployments. The
-https://charts.kubewarden.io/#configuration[documentation] describes all the
-options.
+include::partial${build-type}-specific/quick-start-installation.adoc[]
 
 == Main components
 
-{admc-short-name} has three main components which you interact with:
+The {admc-short-name} has three main components which you interact with:
 
 * The {policy-server}
 * The {cluster-admission-policy}
@@ -151,7 +81,7 @@ options.
 
 === `PolicyServer`
 
-The `kubewarden-controller` manages a {admc-short-name} `PolicyServer`. You can
+The `{admc-release}` manages a {admc-short-name} `PolicyServer`. You can
 deploy multiple {policy-server}s in the same Kubernetes cluster.
 
 A `PolicyServer` validates incoming requests by executing {admc-short-name}
@@ -166,7 +96,7 @@ kind: PolicyServer
 metadata:
   name: reserved-instance-for-tenant-a
 spec:
-  image: ghcr.io/kubewarden/adm-controller/policy-server:v1.36.0
+  image: {default-policy-server-image-tag}
   replicas: 2
   serviceAccountName: ~
   env:
@@ -174,14 +104,7 @@ spec:
       value: debug
 ----
 
-[NOTE]
-====
-
-Check the
-https://github.com/kubewarden/adm-controller/policy-server/pkgs/container/adm-controller%2Fpolicy-server[latest
-released `PolicyServer` version] and change the tag to match.
-
-====
+include::partial${build-type}-specific/quick-start-policyserver-note.adoc[]
 
 Overview of the attributes of the `PolicyServer` resource:
 
@@ -200,7 +123,7 @@ Overview of the attributes of the `PolicyServer` resource:
 | N
 | `serviceAccountName`
 | The name of the `ServiceAccount` to use for the `PolicyServer` deployment. If
-  there is no provided value, the default `ServiceAccount` from the installation namespace, of `kubewarden-controller`, gets used.
+  there is no provided value, the default `ServiceAccount` from the installation namespace, of `{admc-release}`, gets used.
 
 | N
 | `env`
@@ -400,7 +323,7 @@ NAME              POLICY SERVER   MUTATING   STATUS
 privileged-pods   default         false      pending
 ----
 
-Once the new policy is ready, the `kubewarden-controller`
+Once the new policy is ready, the `admission-controller`
 registers a
 https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#validatingwebhookconfiguration-v1-admissionregistration-k8s-io[ValidatingWebhookConfiguration]
 object to serve it.
@@ -488,84 +411,53 @@ not targeting a specific namespace.
 
 == Uninstall
 
-You can remove the resources created by uninstalling the `helm` charts as
-follows:
+Uninstall the Helm chart as follows:
 
 [subs="+attributes",console]
 ----
-helm uninstall --namespace kubewarden kubewarden-defaults
+helm uninstall --namespace {admc-namespace} {admc-release}
 ----
+
+Uninstalling the Helm chart removes:
+
+* The controller Deployment
+* Managed defaults such as the PolicyServer `default` and recommended policies
+* ConfigMaps, Secrets, Services, Deployments that make all PolicyServers be effective
+
+It does not remove:
+
+- CRDs (kept by `helm.sh/resource-policy: keep`)
+- User-managed PolicyServers and policies
+
+The user-managed custom resources are kept on purpose. Re-installing the chart
+deploys the controller, which reconciles them, and activates them back.
+
+To remove all user-managed custom resources and the CRDs do:
 
 [subs="+attributes",console]
 ----
-helm uninstall --namespace kubewarden kubewarden-controller
-----
-
-[subs="+attributes",console]
-----
-helm uninstall --namespace kubewarden kubewarden-crds
-----
-
-After removal of the `helm` charts remove the Kubernetes namespace used to
-deploy the {admc-short-name} stack:
-
-[subs="+attributes",console]
-----
-kubectl delete namespace kubewarden
-----
-
-[CAUTION]
-====
-
-{admc-short-name} contains a helm pre-delete hook that removes all
-`PolicyServer`s and `kubewarden-controller`s. Then the
-`kubewarden-controller` deletes all resources, so it's important that
-`kubewarden-controller` is running when helm uninstall executes.
-
-====
-
-
-{admc-short-name} deletes {validating-webhook-configuration}s and
-{mutating-webhook-configuration}s. Check this with:
-
-[subs="+attributes",console]
-----
-kubectl get validatingwebhookconfigurations.admissionregistration.k8s.io -l "kubewarden"
-----
-
-[subs="+attributes",console]
-----
-kubectl get mutatingwebhookconfigurations.admissionregistration.k8s.io -l "kubewarden"
-----
-
-If these resources aren't automatically removed, remove them manually using the
-following command:
-
-[subs="+attributes",console]
-----
-kubectl delete -l "kubewarden" validatingwebhookconfigurations.admissionregistration.k8s.io
-----
-
-[subs="+attributes",console]
-----
-kubectl delete -l "kubewarden" mutatingwebhookconfigurations.admissionregistration.k8s.io
+kubectl delete crd policyservers.policies.kubewarden.io
+kubectl delete crd clusteradmissionpolicies.policies.kubewarden.io
+kubectl delete crd admissionpolicies.policies.kubewarden.io
+kubectl delete crd clusteradmissionpolicygroups.policies.kubewarden.io
+kubectl delete crd admissionpolicygroups.policies.kubewarden.io
 ----
 
 == Wrapping up
 
 {cluster-admission-policy} is the core resource that a cluster operator has to
-manage. The `kubewarden-controller` module automatically takes care of the
+manage. The `{admc-release}` module automatically takes care of the
 configuration for the rest of the resources needed to run the policies.
 
 == What's next?
 
-Now, you are ready to deploy {admc-short-name}! Have a look at the policies on
+Now, you are ready to learn more about the {admc-short-name}! Have a look at the policies on
 https://artifacthub.io/packages/search?kind=13[artifacthub.io], on
 https://github.com/topics/kubewarden-policy[GitHub], or reuse existing Rego
 policies as shown in the xref:tutorials/writing-policies/rego/01-intro-rego.adoc[following
 chapters].
 
-.Full list of available policies on ArtifactHub
+.Small selection of available policies on ArtifactHub
 [%collapsible,subs="+macros"]
 ======
 
